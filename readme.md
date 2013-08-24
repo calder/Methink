@@ -1,6 +1,6 @@
 # Methink
 
-Methink is a CLI tool for migrating MySQL databases to RethinkDB
+A MySQL to RethinkDB migration script.
 
 
 ## Usage

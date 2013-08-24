@@ -1,7 +1,7 @@
 {
   "name": "methink",
-  "version": "0.0.0",
-  "description": "Script to migrate MySQL databases to RethinkDB",
+  "version": "0.0.1",
+  "description": "MySQL to RethinkDB migration script",
   "keywords": [
     "development",
     "dev",
