@@ -1,0 +1,101 @@
+#!/usr/bin/env node
+'use strict'
+var Fiber = require('fibers')
+var Future = require('fibers/future')
+var mysql = require('mysql')
+var nopt = require('nopt')
+var pkg = require('../package.json')
+var r = require('rethinkdb')
+var _ = require('lodash')
+
+var opts = nopt({
+  help:    Boolean,
+  verbose: Boolean,
+  version: Boolean,
+
+  mhost:   String,
+  mport:   Number,
+  muser:   String,
+  mpass:   String,
+  mdb:     String,
+  mtable:  String,
+
+  rhost:   String,
+  rport:   Number,
+  rdb:     String,
+  rtable:     String,
+}, {
+  v: '--verbose',
+
+  h: '--mhost',
+  o: '--mport',
+  u: '--muser',
+  p: '--mpass',
+  d: '--mdb',
+  t: '--mtable',
+
+  H: '--rhost',
+  O: '--rport',
+  D: '--rdb',
+  T: '--rtable',
+})
+
+var printOpts = function (name, opts) {
+  console.log(name+"\n"+Array(name.length+1).join("-"))
+  _.each(opts, function (val, key) { console.log("  "+key+": "+val) })
+  console.log()
+}
+
+var mysqlConnect = function (opts) {
+  // Parse options
+  var myOpts = {}
+  if (opts.mhost) myOpts.host = opts.mhost
+  if (opts.mport) myOpts.port = opts.mport
+  if (opts.muser) myOpts.user = opts.muser
+  if (opts.mpass) myOpts.password = opts.mpass
+  if (opts.mdb) myOpts.database = opts.mdb
+  printOpts("MySQL settings", myOpts)
+
+  // Open connection
+  var conn = mysql.createConnection(myOpts)
+  conn.connect()
+  return conn
+}
+
+var rethinkConnect = function (opts) {
+  // Parse options
+  var reOpts = {}
+  if (opts.rhost) reOpts.host = opts.rhost
+  if (opts.rport) reOpts.port = opts.rport
+  printOpts("Rethink settings", reOpts)
+
+  // Open conneciton
+  var f = new Future
+  r.connect(reOpts, function (err, conn) {
+    if (err) throw err
+    f.return(conn)
+  })
+  return f.wait()
+}
+
+var main = function () {
+  var myConn = mysqlConnect(opts)
+  var reConn = rethinkConnect(opts)
+
+  console.log("Reading from MySQL...")
+  myConn.query("SELECT * FROM "+opts.mtable, function (err, results) {
+    if (err) throw err
+
+    console.log("Writing to Rethink...")
+    r.db(opts.rdb).tableCreate(opts.rtable).run(reConn, function (err) {})
+    r.db(opts.rdb).table(opts.rtable).insert(results).run(reConn, function (err) {
+      if (err) throw err
+    })
+
+    console.log("Closing connections...")
+    myConn.end()
+    reConn.close()
+  })
+}
+
+Fiber(main).run()
