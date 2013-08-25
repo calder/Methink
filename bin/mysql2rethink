@@ -1,16 +1,17 @@
 #!/usr/bin/env node
 'use strict'
+var chalk = require('chalk')
 var Fiber = require('fibers')
 var Future = require('fibers/future')
 var mysql = require('mysql')
 var nopt = require('nopt')
-var pkg = require('../package.json')
+var prettyjson = require('prettyjson')
 var r = require('rethinkdb')
 var _ = require('lodash')
 
 var opts = nopt({
   help:    Boolean,
-  verbose: Boolean,
+  silent:  Boolean,
   version: Boolean,
 
   mhost:   String,
@@ -23,9 +24,9 @@ var opts = nopt({
   rhost:   String,
   rport:   Number,
   rdb:     String,
-  rtable:     String,
+  rtable:  String,
 }, {
-  v: '--verbose',
+  s: '--silent',
 
   h: '--mhost',
   o: '--mport',
@@ -40,10 +41,19 @@ var opts = nopt({
   T: '--rtable',
 })
 
-var printOpts = function (name, opts) {
-  console.log(name+"\n"+Array(name.length+1).join("-"))
-  _.each(opts, function (val, key) { console.log("  "+key+": "+val) })
-  console.log()
+var log = opts.silent ? function () {} : function () { console.log.apply(this, arguments) }
+
+var printOpts = function (name, opts, color) {
+  color = color || function (s) { return s }
+  log(color(name+"\n"+Array(name.length+1).join("-")))
+  _.each(opts, function (val, key) { log(color("  "+key+": "+val)) })
+  log()
+}
+
+var printResults = function (results) {
+  log(prettyjson.render(_.map(results, function (r) {
+    return _.omit(r, 'parse', '_typeCast')
+  })))
 }
 
 var mysqlConnect = function (opts) {
@@ -54,7 +64,7 @@ var mysqlConnect = function (opts) {
   if (opts.muser) myOpts.user = opts.muser
   if (opts.mpass) myOpts.password = opts.mpass
   if (opts.mdb) myOpts.database = opts.mdb
-  printOpts("MySQL settings", myOpts)
+  printOpts("MySQL settings", myOpts, chalk.red.bold)
 
   // Open connection
   var conn = mysql.createConnection(myOpts)
@@ -67,7 +77,7 @@ var rethinkConnect = function (opts) {
   var reOpts = {}
   if (opts.rhost) reOpts.host = opts.rhost
   if (opts.rport) reOpts.port = opts.rport
-  printOpts("Rethink settings", reOpts)
+  printOpts("Rethink settings", reOpts, chalk.green.bold)
 
   // Open conneciton
   var f = new Future
@@ -82,17 +92,18 @@ var main = function () {
   var myConn = mysqlConnect(opts)
   var reConn = rethinkConnect(opts)
 
-  console.log("Reading from MySQL...")
+  log(chalk.cyan("Reading from MySQL..."))
   myConn.query("SELECT * FROM "+opts.mtable, function (err, results) {
     if (err) throw err
+    printResults(results)
 
-    console.log("Writing to Rethink...")
+    log(chalk.cyan("Writing to Rethink..."))
     r.db(opts.rdb).tableCreate(opts.rtable).run(reConn, function (err) {})
     r.db(opts.rdb).table(opts.rtable).insert(results).run(reConn, function (err) {
       if (err) throw err
     })
 
-    console.log("Closing connections...")
+    log(chalk.cyan("Closing connections..."))
     myConn.end()
     reConn.close()
   })
