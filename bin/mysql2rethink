@@ -85,7 +85,7 @@ var main = function () {
   console.log("Reading from MySQL...")
   myConn.query("SELECT * FROM "+opts.mtable, function (err, results) {
     if (err) throw err
-
+    if (results) console.log("MySQL Data Recieved: "+results)
     console.log("Writing to Rethink...")
     r.db(opts.rdb).tableCreate(opts.rtable).run(reConn, function (err) {})
     r.db(opts.rdb).table(opts.rtable).insert(results).run(reConn, function (err) {
