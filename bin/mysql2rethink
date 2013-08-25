@@ -87,6 +87,7 @@ var main = function () {
     if (err) throw err
 
     console.log("Writing to Rethink...")
+    r.dbCreate(opts.rdb).run(reConn, function (err) {})
     r.db(opts.rdb).tableCreate(opts.rtable).run(reConn, function (err) {})
     r.db(opts.rdb).table(opts.rtable).insert(results).run(reConn, function (err) {
       if (err) throw err
