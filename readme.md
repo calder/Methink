@@ -5,7 +5,11 @@ A MySQL to RethinkDB migration script.
 
 ## Usage
 
+Migrate single table
 ```mysql2rethink -h 'localhost' -u 'boozeallen' -p 'password123' -d 'prism' -t 'us_citizens' -D 'prism' -T 'us_citizens'```
+
+Migrate all tables
+```mysql2rethink -h 'localhost' -u 'boozeallen' -p 'password123' -d 'prism' -D 'prism'```
 
 
 ## Contribute

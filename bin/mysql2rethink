@@ -1,113 +1,204 @@
 #!/usr/bin/env node
-'use strict'
-var chalk = require('chalk')
-var Fiber = require('fibers')
-var Future = require('fibers/future')
-var mysql = require('mysql')
-var nopt = require('nopt')
-var prettyjson = require('prettyjson')
-var r = require('rethinkdb')
-var _ = require('lodash')
+(function() {
+	"use strict";
+	var chalk = require('chalk');
+	var Fiber = require('fibers');
+	var Future = require('fibers/future');
+	var mysql = require('mysql');
+	var nopt = require('nopt');
+	var prettyjson = require('prettyjson');
+	var r = require('rethinkdb');
+	var _ = require('lodash');
+	var async = require('async');
 
-var opts = nopt({
-  help:    Boolean,
-  silent:  Boolean,
-  version: Boolean,
+	var opts = nopt({
+		help:    Boolean,
+		silent:  Boolean,
+		version: Boolean,
 
-  mhost:   String,
-  mport:   Number,
-  muser:   String,
-  mpass:   String,
-  mdb:     String,
-  mtable:  String,
+		mhost:   String,
+		mport:   Number,
+		muser:   String,
+		mpass:   String,
+		mdb:     String,
+		mtable:  String,
 
-  rhost:   String,
-  rport:   Number,
-  rdb:     String,
-  rtable:  String,
-}, {
-  s: '--silent',
+		rhost:   String,
+		rport:   Number,
+		rdb:     String,
+		rtable:  String,
+	}, {
+		s: '--silent',
 
-  h: '--mhost',
-  o: '--mport',
-  u: '--muser',
-  p: '--mpass',
-  d: '--mdb',
-  t: '--mtable',
+		h: '--mhost',
+		o: '--mport',
+		u: '--muser',
+		p: '--mpass',
+		d: '--mdb',
+		t: '--mtable',
 
-  H: '--rhost',
-  O: '--rport',
-  D: '--rdb',
-  T: '--rtable',
-})
+		H: '--rhost',
+		O: '--rport',
+		D: '--rdb',
+		T: '--rtable'
+	});
 
-var log = opts.silent ? function () {} : function () { console.log.apply(this, arguments) }
+	var log = opts.silent ? function () {} : function () { console.log.apply(this, arguments); };
 
-var printOpts = function (name, opts, color) {
-  color = color || function (s) { return s }
-  log(color(name+"\n"+Array(name.length+1).join("-")))
-  _.each(opts, function (val, key) { log(color("  "+key+": "+val)) })
-  log()
-}
+	var printOpts = function (name, opts, color) {
+		color = color || function (s) { return s; };
+		log(color(name + "\n" + new Array(name.length+1).join("-")));
+		_.each(opts, function (val, key) { log(color("  " + key + ": " + val)); });
+		log();
+	};
 
-var printResults = function (results) {
-  log(prettyjson.render(_.map(results, function (r) {
-    return _.omit(r, 'parse', '_typeCast')
-  })))
-}
+	var printResults = function (results) {
+		log(prettyjson.render(_.map(results, function (r) {
+			return _.omit(r, 'parse', '_typeCast');
+		})));
+	};
 
-var mysqlConnect = function (opts) {
-  // Parse options
-  var myOpts = {}
-  if (opts.mhost) myOpts.host = opts.mhost
-  if (opts.mport) myOpts.port = opts.mport
-  if (opts.muser) myOpts.user = opts.muser
-  if (opts.mpass) myOpts.password = opts.mpass
-  if (opts.mdb) myOpts.database = opts.mdb
-  printOpts("MySQL settings", myOpts, chalk.red.bold)
+	var mysqlConnect = function (opts) {
+		// Parse options
+		var myOpts = {};
+		if (opts.mhost) myOpts.host = opts.mhost;
+		if (opts.mport) myOpts.port = opts.mport;
+		if (opts.muser) myOpts.user = opts.muser;
+		if (opts.mpass) myOpts.password = opts.mpass;
+		if (opts.mdb) myOpts.database = opts.mdb;
+		printOpts("MySQL settings", myOpts, chalk.red.bold);
 
-  // Open connection
-  var conn = mysql.createConnection(myOpts)
-  conn.connect()
-  return conn
-}
+		// Open pool connections
+		var conn = mysql.createPool(myOpts);
+		return conn;
+	};
 
-var rethinkConnect = function (opts) {
-  // Parse options
-  var reOpts = {}
-  if (opts.rhost) reOpts.host = opts.rhost
-  if (opts.rport) reOpts.port = opts.rport
-  printOpts("Rethink settings", reOpts, chalk.green.bold)
+	var rethinkConnect = function (opts) {
+		// Parse options
+		var reOpts = {};
+		if (opts.rhost) reOpts.host = opts.rhost;
+		if (opts.rport) reOpts.port = opts.rport;
+		printOpts("Rethink settings", reOpts, chalk.green.bold);
 
-  // Open conneciton
-  var f = new Future
-  r.connect(reOpts, function (err, conn) {
-    if (err) throw err
-    f.return(conn)
-  })
-  return f.wait()
-}
+		// Open conneciton
+		var f = new Future();
+		r.connect(reOpts, function (err, conn) {
+			if (err) throw err;
+			f.return(conn);
+		});
+		return f.wait();
+	};
 
-var main = function () {
-  var myConn = mysqlConnect(opts)
-  var reConn = rethinkConnect(opts)
+	var main = function () {
+		var myConn = mysqlConnect(opts);
+		var reConn = rethinkConnect(opts);
+		// limit SELECT parts of table
+		var limit = 1000000;
+		
+		r.dbCreate(opts.rdb).run(reConn, function (err) {
+			if (!(opts.mtable && opts.rtable)) {
+				// migrate all tables in selected db
+				migrateAllTables(closeConn);
+			} else {
+				// migrate single table
+				r.db(opts.rdb).tableCreate(opts.rtable).run(reConn, function (err) {
+					migrateSingleTable(opts.mtable, opts.rtable, 0, closeConn);
+				});
+			}
+		});
 
-  log(chalk.cyan("Reading from MySQL..."))
-  myConn.query("SELECT * FROM "+opts.mtable, function (err, results) {
-    if (err) throw err
-    printResults(results)
+		function migrateAllTables(callback) {
+			showTables(function(err, tables) {
+				if (err) throw err;
+				var totalTables = tables.length;
+				log(chalk.yellow("Migrating "+totalTables+" tables"));
+				async.eachLimit(tables, 10, function(table, callback) {
+					var tableName = table['Tables_in_' + opts.mdb];
+					r.db(opts.rdb).tableCreate(tableName).run(reConn, function (err) {
+						migrateSingleTable(tableName, tableName, 0, function(err) {
+							if (err) throw err;
+							log(chalk.green("Table '"+tableName+"' has been migrated successfully ("+(--totalTables)+"/"+tables.length+" tables remaining)"));
+							callback();
+						});
+					});
+				}, callback);
+			});
+		}
 
-    log(chalk.cyan("Writing to Rethink..."))
-    r.dbCreate(opts.rdb).run(reConn, function (err) {})
-    r.db(opts.rdb).tableCreate(opts.rtable).run(reConn, function (err) {})
-    r.db(opts.rdb).table(opts.rtable).insert(results).run(reConn, function (err) {
-      if (err) throw err
-    })
+		// Recursion for migrating single table in parts.
+		// To prevent from out of memory and timeout when SELECT-ing  big table.
+		function migrateSingleTable(mtable, rtable, i, callback) {
+			selectTable(mtable, limit*i, function(err, tableContent) {
+				if (err) throw err;
+				if (tableContent.length) {
+					insertToRethink(rtable, tableContent, function(err, result) {
+						if (err) throw err;
+						if (result.inserted) {
+							log(chalk.yellow("part " + i+ " of '" +mtable + "' - " +result.inserted + " rows has been migrated"));
+						}
+						i++;
+						migrateSingleTable(mtable, rtable, i, callback);
+					});
+				} else {
+					validate(mtable, rtable, function(err, counts) {
+						if (err) throw err;
+						log(chalk.green(mtable + " in mysql has " + counts.mCount + " rows, and " + rtable + " in Rethink has " + counts.rCount + " rows" ));
+						if (counts.mCount === counts.rCount) {
+							log(chalk.green(mtable + " Validation OK"));
+						} else {
+							// the only red log to show failing vaildation
+							log(chalk.red(mtable + " Validation Failed"));
+						}
+						if (callback) { callback(); }
+					});
+				}
+			});
+		}
 
-    log(chalk.cyan("Closing connections..."))
-    myConn.end()
-    reConn.close()
-  })
-}
+		function insertToRethink(tableName, tableContent, callback) {
+			printResults(tableContent);
+			log(chalk.yellow("Writing to Rethink table '"+tableName+"' ("+tableContent.length+" rows)"));
+			r.db(opts.rdb).table(tableName).insert(tableContent).run(reConn, function(err, result) {
+				if (err) throw err;
+				if (callback) { callback(null, result); }
+			});
+			// clear to save memory
+			tableContent = null;
+		}
 
-Fiber(main).run()
+		function selectTable(table, offset, callback) {
+			log(chalk.cyan("Loading data from mysql table '"+table+"' (LIMIT " + limit + " OFFSET " + offset + ")"));
+			myConn.query("SELECT * FROM " + table + " LIMIT "+limit+" OFFSET " + offset, callback);
+		}
+
+		function showTables(callback) {
+			myConn.query("SHOW TABLES", callback);
+		}
+
+		function validate(mtable, rtable, callback) {
+			async.parallel({
+				rCount: function(callback) {
+					r.db(opts.rdb).table(rtable).count().run(reConn, callback);
+				},
+				mCount: function(callback) {
+					myConn.query("SELECT COUNT(*) as count FROM " + mtable, callback);
+				}
+			}, function(err, result) {
+				if (err) throw err;
+				var counts = {
+					rCount: result.rCount,
+					mCount: (result.mCount[0].length ? result.mCount[0][0].count : 0)
+				};
+				callback(null, counts);
+			});
+		}
+
+		function closeConn() {
+			log(chalk.cyan("Closing connections..."));
+			myConn.end();
+			reConn.close();
+		}
+	};
+
+	(new Fiber(main)).run();
+}());
