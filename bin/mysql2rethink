@@ -93,7 +93,7 @@
 		var myConn = mysqlConnect(opts);
 		var reConn = rethinkConnect(opts);
 		// limit SELECT parts of table
-		var limit = 1000000;
+		var limit = 10000;
 		
 		r.dbCreate(opts.rdb).run(reConn, function (err) {
 			if (!(opts.mtable && opts.rtable)) {
@@ -168,7 +168,7 @@
 
 		function selectTable(table, offset, callback) {
 			log(chalk.cyan("Loading data from mysql table '"+table+"' (LIMIT " + limit + " OFFSET " + offset + ")"));
-			myConn.query("SELECT * FROM " + table + " LIMIT "+limit+" OFFSET " + offset, callback);
+			myConn.query("SELECT * FROM `" + table + "` LIMIT "+limit+" OFFSET " + offset, callback);
 		}
 
 		function showTables(callback) {
@@ -181,7 +181,7 @@
 					r.db(opts.rdb).table(rtable).count().run(reConn, callback);
 				},
 				mCount: function(callback) {
-					myConn.query("SELECT COUNT(*) as count FROM " + mtable, callback);
+					myConn.query("SELECT COUNT(*) as count FROM `" + mtable + "`", callback);
 				}
 			}, function(err, result) {
 				if (err) throw err;
